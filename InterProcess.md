@@ -1,114 +1,319 @@
-# File I/O
+# Interprocess communication in UNIX
 
-## File I/O system calls
+## Pipes
 
-### open
+- Pipr "|"
 
-Example (taken from `man open` in Linux):
+  - Connect the stdout of two processes
+  - `Fd[0]` reading, `Fd[1]` writing
+  - Dp2: close 0 and dup on `Fd[1]`
+  - can only work when two processes are parent/grandparent and child
+  - IPC can also support nonrelational
 
-```c
-#include <fcntl.h>
-...
-int fd;
-mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
-char *pathname = "/tmp/file";
-...
-fd = open(pathname, O_WRONLY | O_CREAT | O_TRUNC, mode);
-...
-```
+- Limitation:
 
-Another example – creating a lock file:
+  - Data flows only in one direction
+  - Only process have common ancestor.
 
-```
-fd = open("/var/run/myprog.pid", O_WRONLY | O_CREAT | O_EXCL, 0644);
-```
+- The `pipe()` function:
 
-### creat
-
-Redundant: `creat(path, mode)` is equivalent to `open(path, O_WRONLY|O_CREAT|O_TRUNC, mode)`
-
-And it should have been called `create`, says Ken Thompson
-
-### close
-
-```c
-int close(int fildes);
-```
-
-### lseek
-
-```c
-off_t lseek(int fildes, off_t offset, int whence);
-```
-
-- If whence is SEEK_SET, the file offset shall be set to offset bytes.
-- If whence is SEEK_CUR, the file offset shall be set to its current location plus offset.
-- If whence is SEEK_END, the file offset shall be set to the size of the file plus offset.
-
-### read
-
-```c
-ssize_t read(int fildes, void *buf, size_t nbyte);
-```
-
-- returns number of bytes read, 0 if end of file, -1 on error
-
-Note:
-
-- Number of bytes read may be less than the requested nbyte
-
-- `read()` may block forever on a “slow” read from pipes, FIFOs (aka named pipes), sockets, or keyboard
-
-- For sockets, `read(socket, buf, nbyte)` is equivalent to`recv(socket, buf, nbyte, 0)`
-
-  ```
-  recv(int socket, void *buffer, size_t length, int flags)
+  ```c
+  #include <unistd.h>
+  
+  int pipe(int fd[2]);
+  
+      Returns: 0 if OK, –1 on error
   ```
 
-  - normally, recv() blocks until it has received at least 1 byte
-  - returns num bytes received, 0 if connection closed, -1 if error
+- After calling `pipe()`:
 
-### write
+  ![Figure 15.2, APUE](http://www.cs.columbia.edu/~jae/4118/L05/fig15.2.jpg)Figure 15.2, APUE
 
-```c
-ssize_t write(int fildes, const void *buf, size_t nbyte);
-```
+- After calling `pipe()` and then `fork()`:
 
-- returns number of bytes written, -1 on error
+  ![Figure 15.3, APUE](http://www.cs.columbia.edu/~jae/4118/L05/fig15.3.jpg)Figure 15.3, APUE
 
-Note:
+- Example: copying file to a pager program
 
-- Number of bytes written may be less than the requested nbyte – ex) filling up a disk
+  ```c
+  #include "apue.h"
+  #include <sys/wait.h>
+  
+  #define DEF_PAGER "/bin/more" /* default pager program */
+  
+  int main(int argc, char *argv[])
+  {
+      int         n;
+      int         fd[2];
+      pid_t       pid;
+      char        *pager, *argv0;
+      char        line[MAXLINE];
+      FILE        *fp;
+  
+      if (argc != 2)
+          err_quit("usage: a.out <pathname>");
+  
+      if ((fp = fopen(argv[1], "r")) == NULL)
+          err_sys("can't open %s", argv[1]);
+      if (pipe(fd) < 0)
+          err_sys("pipe error");
+  
+      if ((pid = fork()) < 0) {
+          err_sys("fork error");
+  
+      } else if (pid > 0) {       /* parent */
+  
+          close(fd[0]);           /* close read end */
+  
+          /* parent copies argv[1] to pipe */
+          while (fgets(line, MAXLINE, fp) != NULL) {
+              n = strlen(line);
+              if (write(fd[1], line, n) != n)
+                  err_sys("write error to pipe");
+          }
+          if (ferror(fp))
+              err_sys("fgets error");
+  
+          close(fd[1]);   /* close write end of pipe for reader */
+  
+          if (waitpid(pid, NULL, 0) < 0)
+              err_sys("waitpid error");
+          exit(0);
+  
+      } else {            /* child */
+  
+          close(fd[1]);   /* close write end */
+  
+          if (fd[0] != STDIN_FILENO) {
+              if (dup2(fd[0], STDIN_FILENO) != STDIN_FILENO)
+                  err_sys("dup2 error to stdin");
+              close(fd[0]);       /* don't need this after dup2 */
+          }
+  
+          /* get arguments for execl() */
+          if ((pager = getenv("PAGER")) == NULL)
+              pager = DEF_PAGER;
+          if ((argv0 = strrchr(pager, '/')) != NULL)
+              argv0++;            /* step past rightmost slash */
+          else
+              argv0 = pager;      /* no slash in pager */
+  
+          if (execl(pager, argv0, (char *)0) < 0)
+              err_sys("execl error for %s", pager);
+      }
+      exit(0);
+  }
+  ```
 
-- `write()` may block forever on a “slow” write into pipes, FIFOs, or sockets
+## XSI IPC
 
-- For sockets, `write(socket, buf, nbyte)` is equivalent to`send(socket, buf, nbyte, 0)`
+They share common naming and interface scheme:
+
+- XSI Message queues
+
+  ```c
+  int msgget(key_t key, int flag);
+  int msgctl(int msqid, int cmd, struct msqid_ds *buf);
+  int msgsnd(int msqid, const void *ptr, size_t nbytes, int flag);
+  ssize_t msgrcv(int msqid, void *ptr, size_t nbytes, long type, int flag);
+  ```
+
+- XSI Semaphores
 
   ```
-  send(int socket, const void *buffer, size_t length, int flags)
+  int semget(key_t key, int nsems, int flag);
+  int semctl(int semid, int semnum, int cmd, ... /* union semun arg */ );
+  int semop(int semid, struct sembuf semoparray[], size_t nops);
   ```
 
-  - normally, send() blocks until it sends all bytes requested
-  - returns num bytes sent or -1 for error
+- XSI Shared memory
 
-- If the file was opened with `O_APPEND` flag, the file offset gets set to the end of the file prior to each write
+  ```
+  int shmget(key_t key, size_t size, int flag);
+  int shmctl(int shmid, int cmd, struct shmid_ds *buf);
+  void *shmat(int shmid, const void *addr, int flag);
+  int shmdt(const void *addr);
+  ```
 
-  - setting of the offset and writing happen in an atomic operation
+And they all suck…
 
-## File sharing
+1. Hard to clean-up because there is no reference counting
+   - pipes get automatically removed when last process terminates
+   - data left in a FIFO is removed when last process terminates
+2. Hard to use
+   - complex and inelegant interfaces that don’t fit into UNIX file system paradigm
+   - stupid naming scheme: IPC identifiers, keys, and *project IDs – are you serious?*
 
-1. Kernel data structures for open files
+They have been widely used for lack of alternatives. Fortunately we do have alternatives these days:
 
-   ![Figure 3.7, APUE](http://www.cs.columbia.edu/~jae/4118/L03/fig3.7.jpg)Figure 3.7, APUE
+- Instead of XSI message queues, use:
+  - UNIX domain sockets
+  - POSIX message queues (still not widely available, so not covered in APUE; see `man 7 mq_overview`)
+- Instead of XSI semaphores, use:
+  - POSIX semaphores
+- Instead of XSI shared memory, use:
+  - memory mapping using `mmap()`
 
-2. Two independent processes with the same file open
+## Memory-mapped I/O
 
-   ![Figure 3.8, APUE](http://www.cs.columbia.edu/~jae/4118/L03/fig3.8.jpg)Figure 3.8, APUE
+- `mmap()` function:
 
-3. Kernel data structures after `dup(1)`
+  ```c
+  #include <sys/mman.h>
+  
+  void *mmap(void *addr, size_t len, int prot, int flag, int fd, off_t off);
+  	/*
+  	addr: the address where we want the mapped region to start
+  	normally set to 0 to allow system to choose the starting address
+  	len: the number of bytes to map
+  	fd: specifying the file that is to be mapped
+  	off: is the starting offset in the file of the bytes to map.
+  	*/
+  
+      Returns: starting address of mapped region if OK, MAP_FAILED on error
+  ```
 
-   ![Figure 3.9, APUE](http://www.cs.columbia.edu/~jae/4118/L03/fig3.9.jpg)Figure 3.9, APUE
+- Example of a memory-mapped file:
 
-4. Sharing of open files between parent and child after `fork`
+  ![Figure 14.26, APUE](http://www.cs.columbia.edu/~jae/4118/L05/fig14.26.jpg)Figure 14.26, APUE
 
-   ![Figure 8.2, APUE](http://www.cs.columbia.edu/~jae/4118/L03/fig8.2.jpg)Figure 8.2, APUE
+- Memory mapping `/dev/zero` for shared memory (Figure 15.33, APUE):
+
+  ```c
+  #include "apue.h"
+  #include <fcntl.h>
+  #include <sys/mman.h>
+  
+  #define NLOOPS          1000
+  #define SIZE            sizeof(long)    /* size of shared memory area */
+  
+  static int
+  update(long *ptr)
+  {
+          return((*ptr)++);       /* return value before increment */
+  }
+  
+  int
+  main(void)
+  {
+          int             fd, i, counter;
+          pid_t   pid;
+          void    *area;
+  
+          if ((fd = open("/dev/zero", O_RDWR)) < 0)
+                  err_sys("open error");
+          if ((area = mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)) == MAP_FAILED)
+                  err_sys("mmap error");
+          close(fd);              /* can close /dev/zero now that it's mapped */
+  
+          TELL_WAIT();
+  
+          if ((pid = fork()) < 0) {
+                  err_sys("fork error");
+          } else if (pid > 0) {                   /* parent */
+                  for (i = 0; i < NLOOPS; i += 2) {
+                          if ((counter = update((long *)area)) != i)
+                                  err_quit("parent: expected %d, got %d", i, counter);
+  
+                          TELL_CHILD(pid);
+                          WAIT_CHILD();
+                  }
+          } else {                                                /* child */
+                  for (i = 1; i < NLOOPS + 1; i += 2) {
+                          WAIT_PARENT();
+  
+                          if ((counter = update((long *)area)) != i)
+                                  err_quit("child: expected %d, got %d", i, counter);
+  
+                          TELL_PARENT(getppid());
+                  }
+          }
+  
+          exit(0);
+  }
+  ```
+
+- Anonymous memory mapping
+
+  Same as `/dev/zero` mapping, but more portable and more convenient.
+
+  Change Figure 15.33 as follows:
+
+  1. remove `open("/dev/zero", ...)` and `close(fd)`
+
+  2. change `mmap` call to:
+
+     ```
+     if ((area = mmap(0, SIZE, PROT_READ | PROT_WRITE,
+           MAP_ANON | MAP_SHARED, -1, 0)) == MAP_FAILED)
+     ```
+
+## POSIX Semaphores
+
+- What is semaphore?
+
+  - Binary vs. Counting semaphores
+
+- Creating, opening, closing, and removing **named** POSIX semaphores:
+
+  ```
+  #include <semaphore.h>
+  
+  sem_t *sem_open(const char *name, int oflag, ... /* mode_t mode,
+                  unsigned int value  */ );
+          Returns: Pointer to semaphore if OK, SEM_FAILED on error
+  
+  int sem_close(sem_t *sem);
+          Returns: 0 if OK, –1 on error
+  
+  int sem_unlink(const char *name);
+          Returns: 0 if OK, –1 on error
+  ```
+
+- Initializing and destroying **unnamed** POSIX semaphores:
+
+  ```
+  #include <semaphore.h>
+  
+  int sem_init(sem_t *sem, int pshared, unsigned int value);
+          Returns: 0 if OK, –1 on error
+  
+  int sem_destroy(sem_t *sem);
+          Returns: 0 if OK, –1 on error
+  ```
+
+- Using POSIX semaphores:
+
+  Decrement the value of semaphores:
+
+  ```
+  #include <semaphore.h>
+  
+  int sem_trywait(sem_t *sem);
+  int sem_wait(sem_t *sem);
+          Both return: 0 if OK, –1 on error
+  ```
+
+  Decrement with bounded waiting:
+
+  ```
+  #include <semaphore.h>
+  #include <time.h>
+  
+  int sem_timedwait(sem_t *restrict sem,
+                    const struct timespec *restrict tsptr);
+          Returns: 0 if OK, –1 on error
+  ```
+
+  Increment the value of semaphores:
+
+  ```
+  #include <semaphore.h>
+  
+  int sem_post(sem_t *sem);
+          Returns: 0 if OK, –1 on error
+  ```
+
+------
+
+*Last updated: 2014–02–11*
