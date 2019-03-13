@@ -33,6 +33,125 @@
 
   ![Figure 15.3, APUE](http://www.cs.columbia.edu/~jae/4118/L05/fig15.3.jpg)Figure 15.3, APUE
 
+- The `dup` function:
+
+  ```c
+  #include <unistd.h>
+  
+  int dup(int oldfd); 
+  ```
+
+  After a successful return, the old and new file descriptors may be used interchangeably. They refer to the same open file description and thus share file offset and file status flags. 
+
+  If the file descriptor newfd
+         was previously open, it is silently closed before being reused.
+
+  **using the lowest-numbered unused file descriptor**     
+
+  ```c
+  #include <unistd.h>
+  int dup2(int oldfd, int newfd);
+  *  If oldfd is not a valid file descriptor, then the call fails, and
+  	newfd is not closed.
+  
+  *  If oldfd is a valid file descriptor, and newfd has the same value
+  	as oldfd, then dup2() does nothing, and returns newfd.
+  ```
+
+  The dup2() system call performs the same task as dup(), but instead of using the lowest-numbered unused file descriptor, **it uses the file descriptor number specified in newfd.**
+
+  
+
+  ```c
+  #define _GNU_SOURCE             /* See feature_test_macros(7) */
+  #include <fcntl.h>              /* Obtain O_* constant definitions */
+  #include <unistd.h>
+  int dup3(int oldfd, int newfd, int flags);
+  
+  *  The caller can force the close-on-exec flag to be set for the new
+            file descriptor by specifying O_CLOEXEC in flags.  See the
+            description of the same flag in open(2) for reasons why this may
+            be useful.
+  
+  *  If oldfd equals newfd, then dup3() fails with the error EINVAL.
+  ```
+
+  
+
+- **exec**() family
+
+  Replace the current process image with a new process image.
+
+  ```c
+  #include <unistd.h>
+  
+  extern char **environ;
+  int execl(const char *path, const char *arg, ...);
+  int execlp(const char *file, const char *arg, ...);
+  int execle(const char *path, const char *arg, ..., char * const envp[]);
+  
+  // The first argument, by convention, should point to the filename associated with the file being executed
+  int execv(const char *path, char *const argv[]);
+  int execvp(const char *file, char *const argv[]);
+  int execvpe(const char *file, char *const argv[],
+  char *const envp[]);
+  ```
+
+  1. File/ Path: the name of a file that is to be executed
+  2. *const char \*arg*
+
+- Example: a function to mimic the pipe
+
+  ```c
+  int main(int argc, char **argv)
+      {
+          int fd[2];
+          pid_t pid1, pid2;
+          char **argv1 = argv + 1; // argv for the first command
+          char **argv2;            // argv for the second command
+          for (argv2 = argv1; *argv2; argv2++) {
+              if (strcmp(*argv2, "--") == 0) {
+                  *argv2++ = NULL;
+  				break; 
+              }
+          }
+          if (*argv1 == NULL || *argv2 == NULL) {
+              fprintf(stderr, "%s\n", "separate two commands with --");
+  			exit(1); 
+          }
+  
+          if (pipe(fd) < 0) {
+              perror("pipe failed");
+              exit(1);
+          }
+          if ((pid2 = fork()) == 0) { // in child process executing the second program
+              close(fd[1]); //firstly close the file descriptor for writing
+              dup2(fd[0], 0); // duplicate the file descriptor fd[0] and 0
+            
+              close(fd[0]); // close the read file descriptor
+              execvp(*argv2, argv2); // This is basically executing the exe file of second program
+              perror("execvp failed");
+              exit(1);
+          }
+          if ((pid1 = fork()) == 0) {
+              close(fd[0]); // close the reading file descriptor
+              dup2(fd[1], 1); // duplicate writing file descriptor to 1
+              close(fd[1]);// close write fd
+              execvp(*argv1, argv1);// execute the first program
+              perror("execvp failed");
+              exit(1);
+          }
+          close(fd[0]);
+          close(fd[1]);
+  
+  		waitpid(pid1, NULL, 0);
+          waitpid(pid2, NULL, 0);
+          return 0;
+      }
+  ```
+
+  
+
 - Example: copying file to a pager program
 
   ```c
@@ -243,7 +362,7 @@ They have been widely used for lack of alternatives. Fortunately we do have alte
 
   2. change `mmap` call to:
 
-     ```
+     ```c
      if ((area = mmap(0, SIZE, PROT_READ | PROT_WRITE,
            MAP_ANON | MAP_SHARED, -1, 0)) == MAP_FAILED)
      ```
