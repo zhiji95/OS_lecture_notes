@@ -4,16 +4,19 @@
 
 1. Definition: a segment of code that accesses a shared variable (or resource)
 
-​		No more than one thread in critical section at a time.
+   No more than one thread in critical section at a time.
 
 2. Requirement:
+
    1. Safety (Multual exclusion): no more than 1 thread in critical section at a time.
    2. Liveness (aka progress):
       1. Multi thread simultaneously request: must allow one
       2. should not depend on threads out side of critical section
    3. Bounded waiting (aka starvation-free): must allow waiting thread to proceed
    4. Makes no assumptions about the speed and number of CPU.
+
 3. Properties
+
    1. Efficient: don't consume too much resources 
    2. Fair: don't make one thread wait longer than others.
    3. Simple
@@ -373,12 +376,12 @@ void consumer() {
 
 #### Monitors
 
-1. Monitors
+1. Monitors: monitor producer have only one thread at the same time
 2. Condition variable
    1. operations:
-      1. wait()
-      2. Signal()
-      3. Broadcast()
+      1. wait(): suspend the calling thread and release the lock.
+      2. Signal(): resumes one thread in waiting
+      3. Broadcast(): resumes all thread waiting
    2. Monitor: 1 mutex + N condition variable 
 3. PC with monitors:
    1. nedd 2 condition variables:
@@ -402,12 +405,13 @@ signal (has_empty);
 
 4. CV semantics:
 
-   1. Hoarse semantics: 
+   1. Hoarse semantics: suspends signal thread and immediately transfers control to the waken thread.
 
       for this semantic, the if is probably ok
 
    2. Mesa semantics: moves a signal waiting thread form the blocked state to a runnable state them the signaling thread continues until it exits the nmonitor.
 
-   3. 2 is easy to implement, problem: 
+   3. 2 is easy to implement, problem: race
 
    4. need to replace the if with while
+
