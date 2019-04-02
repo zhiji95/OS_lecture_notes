@@ -213,6 +213,103 @@ each core simulates as two CPUs.
 4. CFS:
 
    1. Ideal fair scheduling:
+
       1. Each runs uniformly 1/n rate.
 
-1. RB tree: sorted by score, each process runs the time it deserves
+      
+
+   2. Scheduling latency: `sysctl_sched_latency`: Run each process once per schedule latency period
+
+   3. `sched_slice()` :  Pi: T * Wi/(Sum of all Wi)
+
+   4. Too many processes: each process will get too little time slices
+
+      1. Lower bound time slices: (1ms for linux)
+      2. Schedule latency = lower bound * number of procs
+
+   5. Pick next process
+
+      1. Pick proc with weighted minimum runtime so far (virtual time =  task->vruntime += executed time / Wi)
+
+   6. Ru queue is a RB tree (balanced binary search tree): sorted by score, each process runs the time it deserves
+
+   7. Converting nice to weight: 
+
+      1. Table of nice levels:
+
+         ```c
+         static const int prio_to_weight[40] (kernel/sched/sched.h)
+         ```
+
+      2. Nice level changes by 1 -> 10% weight
+
+   
+
+5. **BFS:** brain fuck scheduler, forward looking only (patch to the kernel)
+
+   1. Single queue for whole linux system.
+   2. Algorithm for pick processes is complex in math.
+   3. Goal:
+
+6. MuQSS: (earliest eligible virtual deadline first)
+
+   1. Goal: completely do away with the complex design of the past for thr cpu process scheduler and instead implement one that is very simple in basic design
+   2. Summary: per-cpu multiple run queue.
+   3. Reasoning
+   4. Skip list: 
+   5. Insertion: O(log N), never need to search.
+   6. Niffies: 
+   7. Virtual deadline: `rr_interval`. The maximum time two tasks of the same nice level will be running for. Give task a time slice ==` rr_interval`
+
+7. Add scheduler:
+
+   1. kernel/sched/core.c: singleton class
+
+      ```c
+      class = sched_class_highest; 
+      for ( ; ; ) {
+          p = class->pick_next_task(rq); 
+          if (p)
+          	return p; /*
+          * Will never be NULL as the idle class always 
+          * returns a non-NULL p:
+          */
+          class = class->next; 
+      }
+      ```
+
+   2. sched_class Structure
+
+      ```c
+      static const struct sched_class fair_sched_class = {
+      
+      .next = &idle_sched_class,
+      .enqueue_task = enqueue_task_fair
+      .dequeue_task
+      .yield_task
+      .check_preempt_curr
+      .pick_next_task
+      .put_prev_task
+      .select_task_rq
+      .load_balance
+      .move_one_task
+      .set_curr_task
+      .task_tick
+      .task_fork
+      .prio_changed
+      .switched_to
+      }
+      ```
+
+      
+
+   3. Run queue:
+
+      ```c
+      struct rq (kernel/sched/sched.h)
+      struct sched_entity (include/linux/sched.h)
+      task_struct.sched_class
+      ```
+
+   4. 
+
